@@ -1,7 +1,3 @@
-from api.adapters.rates_adapter import RatesAdapter
-
-
-
 from fredapi import Fred
 import os
 
@@ -11,9 +7,5 @@ fred = Fred(api_key=FredApiKey)
 todayRates = fred
 
 
-#RatesAdapter.generateTreasuryYields()
-#RatesAdapter.generateSOFR()
-
-
-
-
+# RatesAdapter.generateTreasuryYields()
+# RatesAdapter.generateSOFR()

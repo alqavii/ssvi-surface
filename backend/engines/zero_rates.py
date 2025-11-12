@@ -5,7 +5,7 @@ import pandas as pd
 
 class ZeroRatesEngine:
     @staticmethod
-    def calcZeroRates(yields: pd.DataFrame) -> list:
+    def calcZeroRates(yields: pd.Series) -> list:
         discountRates = {}
         discountRates[0.5] = 100 / (100 + 100 * yields[0.5] / 2)
 
@@ -29,7 +29,7 @@ class ZeroRatesEngine:
             discountRates.update(
                 {
                     prev + k * 0.5: discountRates[prev]
-                    * math.exp(-forwardRate[0] * (k * 0.5))
+                    * math.exp(-forwardRate * (k * 0.5))
                     for k in range(1, ((tenor - prev) * 2) + 1)
                 }
             )

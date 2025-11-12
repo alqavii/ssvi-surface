@@ -2,8 +2,8 @@ import pandas as pd
 import math
 from fredapi import Fred
 import os
-from datetime import datetime
-from api.data.metadata import TENOR_TO_ID
+from datetime import datetime, timedelta
+from data.metadata import TENOR_TO_ID
 from pathlib import Path
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -58,7 +58,9 @@ class RatesAdapter:
             df["parYield"] = df["parYield"].round(4)
             df["date"] = pd.to_datetime(df["date"]).dt.date
 
-            dfs.append(df[["date", "parYield"]].rename(columns={"parYield": tenor}))
+            dfs.append(
+                df[["date", "parYield"]].rename(columns={"parYield": str(tenor)})  # type: ignore
+            )
 
         merged = dfs[0]
         for df in dfs[1:]:
@@ -95,8 +97,8 @@ class RatesAdapter:
           on discount factors.
         """
         from datetime import date as _date
-        from api.engines.zero_rates import ZeroRatesEngine
-        
+        from engines.zero_rates import ZeroRatesEngine
+
         # Normalize dates
         if isinstance(target_date, datetime):
             target_date = target_date.date()
@@ -151,7 +153,7 @@ class RatesAdapter:
 
             # Map half-year grid to zero rates: 0.5, 1.0, ...
             tenors = [0.5 * (i + 1) for i in range(len(zero_list))]
-            zero_curve = pd.Series(zero_list, index=tenors)
+            zero_curve = pd.Series(zero_list, index=tenors, dtype=float)
 
             # Year fraction from request_date to target_date (ACT/365.25)
             days = (target_date - request_date).days
@@ -161,12 +163,15 @@ class RatesAdapter:
                 return float(zero_curve.iloc[0])
 
             # Convert zero rates to discount factors on grid
-            df_grid = pd.Series(
-                {T: math.exp(-float(r) * T) for T, r in zero_curve.items()}
-            ).sort_index()
+            df_data = {}
+            for T, r in zero_curve.items():
+                T_float = float(T)  # type: ignore
+                r_float = float(r)  # type: ignore
+                df_data[T_float] = math.exp(-r_float * T_float)
+            df_grid = pd.Series(df_data, dtype=float).sort_index()
 
             # Interpolate ln DF (log-linear on DF), then convert back to zero rate
-            grid_T = df_grid.index.to_list()
+            grid_T = [float(x) for x in df_grid.index.to_list()]
             grid_lnDF = [math.log(v) for v in df_grid.values]
 
             # Find bracketing nodes
@@ -191,3 +196,182 @@ class RatesAdapter:
             return float(z_t)
         except Exception:
             return None
+
+    @staticmethod
+    def updateSOFR():
+        """
+        Incrementally update SOFR data with only the latest values.
+        Appends new data to existing sofr_data.csv file.
+        """
+        try:
+            # Read existing data to find last date
+            sofr_file = DATA_DIR / "sofr_data.csv"
+            if sofr_file.exists():
+                existing_df = pd.read_csv(sofr_file)
+                existing_df["date"] = pd.to_datetime(existing_df["date"]).dt.date
+                last_date = existing_df["date"].max()
+                start_date = last_date + timedelta(days=1)
+            else:
+                # If file doesn't exist, start from 2000
+                start_date = datetime(2000, 1, 1).date()
+                existing_df = pd.DataFrame(columns=["date", "SOFR"])  # type: ignore
+
+            # Get new data from FRED
+            new_data = fred.get_series("SOFR", observation_start=start_date)
+
+            if new_data.empty:
+                print(f"No new SOFR data available from {start_date}")
+                return
+
+            # Process new data
+            new_df = new_data.reset_index().rename(columns={"index": "date", 0: "SOFR"})
+            new_df["date"] = pd.to_datetime(new_df["date"]).dt.date
+
+            # Remove any duplicates and sort
+            new_df = new_df.drop_duplicates(subset=["date"]).sort_values("date")
+
+            # Forward fill any missing values
+            new_df["SOFR"] = new_df["SOFR"].ffill()
+
+            # Combine with existing data
+            if not existing_df.empty:
+                combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+            else:
+                combined_df = new_df
+
+            # Remove duplicates and sort
+            combined_df = combined_df.drop_duplicates(subset=["date"]).sort_values(
+                "date"
+            )
+            combined_df["SOFR"] = combined_df["SOFR"].ffill()
+
+            # Save updated data
+            combined_df.to_csv(sofr_file, index=False)
+            print(f"Updated SOFR data: added {len(new_df)} new records")
+
+        except Exception as e:
+            print(f"Error updating SOFR data: {e}")
+
+    @staticmethod
+    def updateTreasuryYields():
+        """
+        Incrementally update treasury yield data with only the latest values.
+        Appends new data to existing treasury_par_yields.csv file.
+        """
+        try:
+            # Read existing data to find last date
+            treasury_file = DATA_DIR / "treasury_par_yields.csv"
+            if treasury_file.exists():
+                existing_df = pd.read_csv(treasury_file)
+                existing_df["date"] = pd.to_datetime(existing_df["date"]).dt.date
+                last_date = existing_df["date"].max()
+                start_date = last_date + timedelta(days=1)
+            else:
+                # If file doesn't exist, start from 2000
+                start_date = datetime(2000, 1, 1).date()
+                existing_df = pd.DataFrame(columns=["date"])  # type: ignore
+
+            # Collect new data for each tenor
+            new_dfs = []
+            for tenor, seriesId in TENOR_TO_ID.items():
+                try:
+                    # Get new data from FRED
+                    new_data = fred.get_series(seriesId, observation_start=start_date)
+
+                    if new_data.empty:
+                        continue
+
+                    # Process new data
+                    new_df = new_data.reset_index().rename(
+                        columns={"index": "date", 0: tenor}
+                    )
+                    new_df["parYield"] = new_df[tenor] * 0.01
+                    new_df["parYield"] = new_df["parYield"].round(4)
+                    new_df["date"] = pd.to_datetime(new_df["date"]).dt.date
+
+                    # Remove duplicates and sort
+                    new_df = new_df.drop_duplicates(subset=["date"]).sort_values("date")
+
+                    # Forward fill any missing values
+                    new_df["parYield"] = new_df["parYield"].ffill()
+
+                    # Rename parYield column to tenor
+                    new_df = new_df[["date", "parYield"]].rename(
+                        columns={"parYield": str(tenor)}
+                    )  # type: ignore
+                    new_dfs.append(new_df)
+
+                except Exception as e:
+                    print(f"Error updating tenor {tenor}: {e}")
+                    continue
+
+            if not new_dfs:
+                print(f"No new treasury yield data available from {start_date}")
+                return
+
+            # Merge all tenor data
+            merged_new = new_dfs[0]
+            for df in new_dfs[1:]:
+                merged_new = pd.merge(merged_new, df, on=["date"], how="outer")
+
+            # Sort and forward fill
+            merged_new = merged_new.sort_values("date").drop_duplicates("date")
+            merged_new = merged_new.ffill()
+
+            # Combine with existing data
+            if not existing_df.empty and "date" in existing_df.columns:
+                combined_df = pd.concat([existing_df, merged_new], ignore_index=True)
+            else:
+                combined_df = merged_new
+
+            # Remove duplicates and sort
+            combined_df = combined_df.drop_duplicates(subset=["date"]).sort_values(
+                "date"
+            )
+            combined_df = combined_df.ffill()
+
+            # Save updated data
+            combined_df.to_csv(treasury_file, index=False)
+            print(f"Updated treasury yields: added {len(merged_new)} new records")
+
+        except Exception as e:
+            print(f"Error updating treasury yields: {e}")
+
+    @staticmethod
+    def updateAllRates():
+        """
+        Update both SOFR and treasury yield data incrementally.
+        This is the main method to call for daily updates.
+        """
+        print("Starting incremental rate updates...")
+        RatesAdapter.updateSOFR()
+        RatesAdapter.updateTreasuryYields()
+        print("Rate updates completed.")
+
+    @staticmethod
+    def getLastUpdateDate():
+        """
+        Get the last update date for both SOFR and treasury data.
+        Returns a dict with 'sofr' and 'treasury' keys.
+        """
+        result = {}
+
+        # Check SOFR data
+        sofr_file = DATA_DIR / "sofr_data.csv"
+        if sofr_file.exists():
+            df = pd.read_csv(sofr_file)
+            df["date"] = pd.to_datetime(df["date"]).dt.date
+            result["sofr"] = df["date"].max()
+        else:
+            result["sofr"] = None
+
+        # Check treasury data
+        treasury_file = DATA_DIR / "treasury_par_yields.csv"
+        if treasury_file.exists():
+            df = pd.read_csv(treasury_file)
+            df["date"] = pd.to_datetime(df["date"]).dt.date
+            result["treasury"] = df["date"].max()
+        else:
+            result["treasury"] = None
+
+        return result

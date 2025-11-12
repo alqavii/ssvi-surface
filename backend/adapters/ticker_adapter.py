@@ -1,15 +1,29 @@
 import yfinance as yf
 from zoneinfo import ZoneInfo
-from api.models.config_model import Config
-from api.models.ticker_data import TickerModel
-from api.data.metadata import EXCHANGE_TIMEZONES
+from models.config_model import Config
+from models.ticker_data import TickerModel
+from data.metadata import EXCHANGE_TIMEZONES
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockLatestQuoteRequest
+import os
+
+ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
+ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
+
+StockClient = StockHistoricalDataClient(
+    api_key=ALPACA_API_KEY, secret_key=ALPACA_SECRET_KEY
+)
 
 
 class TickerAdapter:
     @staticmethod
     def fetchBasic(cfg: Config) -> TickerModel:
+        symbol = StockLatestQuoteRequest(symbol_or_symbols=cfg.ticker)
+        latest_quote = StockClient.get_stock_latest_quote(symbol)
+        spot = (
+            latest_quote[cfg.ticker].ask_price + latest_quote[cfg.ticker].bid_price
+        ) / 2
         stock = yf.Ticker(cfg.ticker)
-        spot = stock.history(period="1d", interval="1m")["Close"].iloc[-1]
         dividendYield = stock.info.get("dividendYield", 0)
         exchange = stock.info.get("exchange", "N/A")
         timezone = EXCHANGE_TIMEZONES.get(exchange, ZoneInfo("UTC"))
