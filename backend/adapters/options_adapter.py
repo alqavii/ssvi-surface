@@ -2,7 +2,6 @@ import os
 import pandas as pd
 from typing import List, Any
 from models.config_model import Config
-from models.ticker_data import TickerModel
 from models.options_data import OptionsModel, OptionType
 from alpaca.data.historical import OptionHistoricalDataClient
 from alpaca.data.requests import OptionChainRequest
@@ -17,7 +16,7 @@ OptionsClient = OptionHistoricalDataClient(
 
 class OptionsAdapter:
     @staticmethod
-    def fetchOptionChain(cfg: Config, ticker: TickerModel) -> List[OptionsModel]:
+    def fetchOptionChain(cfg: Config) -> List[OptionsModel]:
         request = OptionChainRequest(underlying_symbol=cfg.ticker)  # type: ignore
         chain = OptionsClient.get_option_chain(request)
 
