@@ -3,14 +3,17 @@ from typing import Optional
 from datetime import date
 from enum import Enum
 
+
 class OptionType(str, Enum):
     CALL = "call"
     PUT = "put"
+
 
 class OptionsModel(BaseModel):
     ticker: str
 
     expiry: date
+    timeToExpiry: Optional[float] = None
     optionType: OptionType
     strike: float
     lastPrice: float
@@ -28,4 +31,3 @@ class OptionsModel(BaseModel):
     vega: Optional[float] = None
     theta: Optional[float] = None
     rho: Optional[float] = None
-

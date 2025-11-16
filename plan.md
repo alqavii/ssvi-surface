@@ -16,32 +16,6 @@
 
 ## Phase 1: Infrastructure & Backend Foundation
 
-### 1.1 Database Setup 🔴 FULL AI
-
-- PostgreSQL with SQLAlchemy/asyncpg connection pooling
-- **Comprehensive schema**:
-  - `rates_data` - Risk-free rates, treasury yields, SOFR
-  - `options_chains` - Real-time options data (strikes, expiries, prices, Greeks)
-  - `options_history` - Historical options data for backtesting
-  - `volatility_surfaces` - IV surfaces, model parameters, calibration results
-  - `strategies` - Strategy definitions, parameters, performance metrics
-  - `positions` - Current positions, trades, P&L tracking
-  - `portfolio_analytics` - Risk metrics, performance attribution, VaR
-  - `screener_filters` - Custom screening criteria and saved filters
-  - **Energy Commodities Data**:
-    - `energy_futures` - WTI, Brent, NG, refined product futures
-    - `energy_spreads` - Crack spreads, calendar spreads, basis spreads
-    - `energy_options` - Energy futures options chains
-    - `energy_fundamentals` - EIA data, OPEC+ production, storage levels
-    - `energy_weather` - Hurricane tracking, HDD/CDD data
-  - **Geospatial Energy Data**:
-    - `tanker_tracking` - VLCC, Suezmax positions and routes
-    - `pipeline_flows` - Major pipeline flow rates and capacity
-    - `port_data` - Loading/unloading capacity and congestion
-    - `storage_facilities` - Cushing, SPR, LNG storage levels
-  - `broker_data` - Orders, executions, account information
-- Alembic migrations for schema versioning
-- *Pure plumbing - let AI handle*
 
 ### 1.2 API Structure 🔴 FULL AI
 
@@ -481,7 +455,7 @@
 
 ### 🔴 LET AI HANDLE (Full AI) - Plumbing
 
-1. **Database/API setup** - FastAPI routes, SQLAlchemy models, migrations
+1. **API setup** - FastAPI routes
 2. **Frontend scaffolding** - Next.js pages, component structure, routing
 3. **Docker/deployment** - Infrastructure as code
 4. **UI libraries** - Plotly/Leaflet integration, chart components

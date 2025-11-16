@@ -1,10 +1,11 @@
 import os
 import pandas as pd
 from typing import List, Any
-from models.config_model import Config
+from models.config_model import IVConfig
 from models.options_data import OptionsModel, OptionType
 from alpaca.data.historical import OptionHistoricalDataClient
 from alpaca.data.requests import OptionChainRequest
+from utils.time_utils import getTimeToExpiry
 
 ALPACA_API_KEY = os.getenv("ALPACA_API_KEY")
 ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
@@ -16,7 +17,7 @@ OptionsClient = OptionHistoricalDataClient(
 
 class OptionsAdapter:
     @staticmethod
-    def fetchOptionChain(cfg: Config) -> List[OptionsModel]:
+    def fetchOptionChain(cfg: IVConfig) -> List[OptionsModel]:
         request = OptionChainRequest(underlying_symbol=cfg.ticker)  # type: ignore
         chain = OptionsClient.get_option_chain(request)
 
@@ -69,6 +70,8 @@ class OptionsAdapter:
                     rho=getattr(greeks, "rho", None) if greeks else None,
                 )
             )
+
+            options = getTimeToExpiry(options)
 
         return options
 
