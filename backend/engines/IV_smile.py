@@ -13,6 +13,7 @@ class IVEngine:
         cfg: IVConfig,
         options: List[OptionsModel],
         rate: float,
+        dividendYield: float,
         spot: float,
     ):
         ivs = []
@@ -22,7 +23,7 @@ class IVEngine:
                 option.timeToExpiry if option.timeToExpiry else 0,
                 option.midPrice,
                 rate,
-                0,
+                dividendYield,
                 spot,
             )
             ivs.append(iv)

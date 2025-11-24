@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+env/
+.env
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frontend
+frontend/my-app/node_modules/
+frontend/my-app/.next/
+frontend/my-app/build/
+frontend/my-app/dist/
+frontend/my-app/.env
+frontend/my-app/.env.local
+frontend/my-app/.env.development.local
+frontend/my-app/.env.test.local
+frontend/my-app/.env.production.local
+frontend/my-app/npm-debug.log*
+frontend/my-app/yarn-debug.log*
+frontend/my-app/yarn-error.log*
+
+# Project specific
+backend/test.py
+
