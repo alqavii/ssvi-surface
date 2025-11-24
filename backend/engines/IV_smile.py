@@ -1,7 +1,6 @@
-from models.options_data import OptionsModel
 from models.config_model import IVConfig
-from typing import List
 import numpy as np
+import pandas as pd
 from scipy.stats import norm
 from scipy.optimize import root_scalar
 from math import isfinite
@@ -11,17 +10,24 @@ class IVEngine:
     @staticmethod
     def generateIVSmile(
         cfg: IVConfig,
-        options: List[OptionsModel],
+        options_df: pd.DataFrame,
         rate: float,
         dividendYield: float,
         spot: float,
     ):
+        if options_df.empty:
+            return []
+
+        required_cols = ["strike", "timeToExpiry", "midPrice"]
+        if not all(col in options_df.columns for col in required_cols):
+            return []
+
         ivs = []
-        for option in options:
+        for _, row in options_df.iterrows():
             iv = IVEngine._impliedVolatility(
-                option.strike,
-                option.timeToExpiry if option.timeToExpiry else 0,
-                option.midPrice,
+                row["strike"],
+                row["timeToExpiry"],
+                row["midPrice"],
                 rate,
                 dividendYield,
                 spot,
