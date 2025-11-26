@@ -10,7 +10,7 @@ class IVConfig(BaseModel):
     gridPoints: int = 41
 
     expiryGranularity: Literal["all", "weekly", "monthly"] = "all"
-    maxExpiries = 7
+    maxExpiries: int = 7
 
     smoothing: Literal["none", "spline"] = "spline"
 

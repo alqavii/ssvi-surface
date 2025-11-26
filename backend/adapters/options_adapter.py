@@ -1,7 +1,8 @@
 import os
 import pandas as pd
 from typing import Any, Dict
-from datetime import date
+from datetime import date, datetime, time
+import pytz
 from models.options_data import OptionType, OptionsRequest
 from alpaca.data.historical import OptionHistoricalDataClient
 from alpaca.data.requests import OptionChainRequest
@@ -171,8 +172,39 @@ class OptionsAdapter:
         df = pd.DataFrame(data_rows)
 
         if not df.empty:
-            today = date.today()
-            df["timeToExpiry"] = df["expiry"].apply(lambda x: (x - today).days / 365.0)
-            df["timeToExpiry"] = df["timeToExpiry"].apply(lambda x: max(x, 1e-4))
+            # Timezone handling for accurate Time to Expiry (TTE)
+            # US Market Close is generally 16:00 ET.
+            # We assume options expire at 16:00 ET on the expiry date.
+            et_tz = pytz.timezone("US/Eastern")
+            utc_tz = pytz.utc
+
+            # Current time in UTC
+            now_utc = datetime.now(utc_tz)
+
+            def calculate_tte(expiry_date):
+                # Construct expiry datetime: Expiry Date @ 16:00:00 ET
+                # Create naive datetime at 16:00
+                expiry_dt_naive = datetime.combine(expiry_date, time(16, 0, 0))
+                # Localize to Eastern Time
+                expiry_dt_et = et_tz.localize(expiry_dt_naive)
+                # Convert to UTC for comparison
+                expiry_dt_utc = expiry_dt_et.astimezone(utc_tz)
+
+                # Difference in seconds
+                diff_seconds = (expiry_dt_utc - now_utc).total_seconds()
+
+                # Convert to years (365 days * 24 hours * 3600 seconds)
+                # Using 365.0 days per year convention
+                years = diff_seconds / (365.0 * 24.0 * 3600.0)
+
+                return max(years, 1e-5)  # Ensure strictly positive, minimal TTE
+
+            df["timeToExpiry"] = df["expiry"].apply(calculate_tte)
+
+            # Sort by expiry (ascending) and then by strike (ascending)
+            df.sort_values(
+                by=["expiry", "strike"], ascending=[True, True], inplace=True
+            )
+            df.reset_index(drop=True, inplace=True)
 
         return df

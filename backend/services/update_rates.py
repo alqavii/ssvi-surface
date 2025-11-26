@@ -5,7 +5,3 @@ FredApiKey = os.getenv("FRED_API_KEY")
 fred = Fred(api_key=FredApiKey)
 
 todayRates = fred
-
-
-# RatesAdapter.generateTreasuryYields()
-# RatesAdapter.generateSOFR()
