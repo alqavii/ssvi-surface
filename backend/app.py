@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from datetime import date
 from dateutil.relativedelta import relativedelta
+import math
 
 from adapters.options_adapter import OptionsAdapter
 from adapters.rates_adapter import RatesAdapter
@@ -41,6 +42,16 @@ def parse_duration(dur: str) -> date:
         years = int(dur[:-1])
         return today + relativedelta(years=years)
     return today + relativedelta(years=1)
+
+
+def format_expiry_label(tte_years: float) -> str:
+    days = tte_years * 365.0
+    if days < 60:
+        return f"T={int(days)}d"
+    elif days < 365:
+        return f"T={days / 30:.1f}m"
+    else:
+        return f"T={tte_years:.1f}y"
 
 
 @app.post("/api/analytics")
@@ -83,7 +94,8 @@ async def get_analytics(req: DashboardRequest):
             & (df["timeToExpiry"] > 0.002)  # Filter very near term noise
         ]
 
-        surface_data = IVEngine.generate_surface_mesh(valid_df, grid_size=30)
+        # Explicitly use higher grid size for smooth visual
+        surface_data = IVEngine.generate_surface_mesh(valid_df, grid_size=100)
 
         # Generate Smile Curves (Group by Expiry)
         # We take top 5 most liquid expiries or evenly spaced ones
@@ -95,11 +107,22 @@ async def get_analytics(req: DashboardRequest):
             slice_df = valid_df[valid_df["expiry"] == exp].sort_values("strike")
             if not slice_df.empty and len(slice_df) > 3:
                 tte = slice_df["timeToExpiry"].iloc[0]
+
+                # Use smoothed_iv if available, fallback to iv
+                iv_column = "smoothed_iv" if "smoothed_iv" in slice_df.columns else "iv"
+
+                # Sanitize IVs to handle NaNs
+                raw_ivs = slice_df[iv_column].tolist()
+                sanitized_ivs = [
+                    None if (isinstance(x, float) and math.isnan(x)) else x
+                    for x in raw_ivs
+                ]
+
                 smile_data.append(
                     {
-                        "expiry": f"T={tte:.2f}y",
+                        "expiry": format_expiry_label(tte),
                         "strikes": slice_df["strike"].tolist(),
-                        "ivs": slice_df["iv"].tolist(),
+                        "ivs": sanitized_ivs,
                     }
                 )
 

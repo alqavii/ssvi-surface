@@ -47,7 +47,7 @@ export function SurfacePlot({ data, isLoading }: SurfacePlotProps) {
       x: data.x,
       y: yDays, // Use Days instead of Years
       z: data.z,
-      colorscale: "Viridis",
+      colorscale: "Jet",
       showscale: true,
       contours: {
         z: {

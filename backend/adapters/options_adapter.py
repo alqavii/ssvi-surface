@@ -68,7 +68,7 @@ class OptionsAdapter:
             day = int(date_str[4:6])
             exp_date = date(year, month, day)
 
-            opt_type = "CALL" if type_char.upper() == "C" else "PUT"
+            opt_type = "call" if type_char.upper() == "C" else "put"
 
             strike_price = float(strike_str) / 1000.0
 
