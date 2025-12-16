@@ -175,31 +175,12 @@ class OptionsAdapter:
             # Timezone handling for accurate Time to Expiry (TTE)
             # US Market Close is generally 16:00 ET.
             # We assume options expire at 16:00 ET on the expiry date.
-            et_tz = pytz.timezone("US/Eastern")
-            utc_tz = pytz.utc
+            from utils.tte import tte
 
-            # Current time in UTC
-            now_utc = datetime.now(utc_tz)
-
-            def calculate_tte(expiry_date):
-                # Construct expiry datetime: Expiry Date @ 16:00:00 ET
-                # Create naive datetime at 16:00
-                expiry_dt_naive = datetime.combine(expiry_date, time(16, 0, 0))
-                # Localize to Eastern Time
-                expiry_dt_et = et_tz.localize(expiry_dt_naive)
-                # Convert to UTC for comparison
-                expiry_dt_utc = expiry_dt_et.astimezone(utc_tz)
-
-                # Difference in seconds
-                diff_seconds = (expiry_dt_utc - now_utc).total_seconds()
-
-                # Convert to years (365 days * 24 hours * 3600 seconds)
-                # Using 365.0 days per year convention
-                years = diff_seconds / (365.0 * 24.0 * 3600.0)
-
-                return max(years, 1e-5)  # Ensure strictly positive, minimal TTE
-
-            df["timeToExpiry"] = df["expiry"].apply(calculate_tte)
+            now_utc = datetime.now(pytz.utc)
+            df["timeToExpiry"] = tte(
+                df["expiry"], now_utc=now_utc, market_close_et=time(16, 0, 0)
+            )
 
             # Sort by expiry (ascending) and then by strike (ascending)
             df.sort_values(

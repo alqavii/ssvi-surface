@@ -13,13 +13,13 @@ class IVEngine:
     @staticmethod
     def generateIVSmile(
         options_df: pd.DataFrame,
-        rate: float,
+        rate: pd.DataFrame,
         dividendYield: float,
         spot: float,
         optionType: OptionType,
     ) -> pd.DataFrame:
         df = options_df[options_df["optionType"] == optionType.value].copy()
-        df = df[["optionType", "strike", "timeToExpiry", "midPrice"]]
+        df = df[["optionType", "strike", "timeToExpiry", "midPrice", "rate", "expiry"]]
         df = df.rename(  # type: ignore
             columns={
                 "optionType": "type",
@@ -85,26 +85,3 @@ class IVEngine:
         return sigma
 
         # ... inside IVEngine class ...
-
-    @staticmethod
-    def _ssvi_surface_formula(K, F, theta, phi, rho):
-        k = np.log(K / F)
-        w = (
-            1
-            / 2
-            * theta
-            * (1 + rho * phi * k + np.sqrt((phi * k + rho) ** 2 + 1 - rho**2))
-        )
-
-        return w
-
-        """
-        SSVI No-Arbitrage Constraints.
-        params: [theta, phi, rho]
-
-        Conditions:
-        1. theta > 0
-        2. phi > 0
-        3. |rho| < 1
-        4. theta * phi * (1 + |rho|) < 4  (No Butterfly Arbitrage)
-        """

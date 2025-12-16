@@ -21,6 +21,9 @@ class TickerAdapter:
         latest_quote = StockClient.get_stock_latest_quote(symbol)
         spot = (latest_quote[ticker].ask_price + latest_quote[ticker].bid_price) / 2
         stock = yf.Ticker(ticker)
+        yahoo_spot = stock.history(period="1d")["Close"].iloc[-1]
+        if abs(spot - yahoo_spot) / yahoo_spot > 0.01:
+            spot = yahoo_spot  # Use Yahoo spot if Alpaca quote is stale
         dividendYield = stock.info.get("dividendYield", 0)
         exchange = stock.info.get("exchange", "N/A")
         timezone = EXCHANGE_TIMEZONES.get(exchange, ZoneInfo("UTC"))
