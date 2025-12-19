@@ -20,5 +20,7 @@ class OptionsRequest(BaseModel):
     strike: Optional[float] = Field(default=None)
     strikeMin: Optional[float] = Field(default=None)
     strikeMax: Optional[float] = Field(default=None)
+    moneynessMin: Optional[float] = Field(default=None)
+    moneynessMax: Optional[float] = Field(default=None)
 
-    limit: int = Field(default=250)
+    limit: Optional[int] = Field(default=None)

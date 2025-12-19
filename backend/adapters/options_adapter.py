@@ -1,12 +1,13 @@
 import os
 import pandas as pd
 from typing import Any, Dict
-from datetime import date, datetime, time
+from datetime import datetime, time
 import pytz
 from models.options_data import OptionType, OptionsRequest
 from alpaca.data.historical import OptionHistoricalDataClient
 from alpaca.data.requests import OptionChainRequest
 from alpaca.trading.enums import ContractType
+import yfinance as yf
 
 OptionsClient = OptionHistoricalDataClient(
     api_key=os.getenv("ALPACA_KEY"), secret_key=os.getenv("ALPACA_SECRET_KEY")
@@ -17,6 +18,9 @@ class OptionsAdapter:
     @staticmethod
     def _build_request_kwargs(req: OptionsRequest) -> Dict[str, Any]:
         params: Dict[str, Any] = {"underlying_symbol": req.ticker}
+
+        ticker = yf.Ticker(req.ticker)
+        spot_price = ticker.history(period="1d")["Close"].iloc[-1]
 
         if req.optionType:
             params["type"] = (
@@ -41,111 +45,100 @@ class OptionsAdapter:
                 params["strike_price_gte"] = req.strikeMin
             if req.strikeMax is not None:
                 params["strike_price_lte"] = req.strikeMax
+            if req.moneynessMin is not None:
+                params["strike_price_gte"] = req.moneynessMin * spot_price
+            if req.moneynessMax is not None:
+                params["strike_price_lte"] = req.moneynessMax * spot_price
 
         return params
 
     @staticmethod
-    def _parse_option_to_dict(ticker: str, opt: Any) -> Dict[str, Any] | None:
-        symbol = getattr(opt, "symbol", None)
-        if not symbol:
-            return None
+    def _parse_chain_to_df(ticker: str, raw_chain: list) -> pd.DataFrame:
+        if not raw_chain:
+            return pd.DataFrame()
 
-        try:
-            root_len = len(ticker)
-            if not symbol.startswith(ticker):
-                return None
-
-            if len(symbol) < 15 + root_len:
-                return None
-
-            suffix = symbol[-15:]
-            date_str = suffix[:6]
-            type_char = suffix[6]
-            strike_str = suffix[7:]
-
-            year = int("20" + date_str[:2])
-            month = int(date_str[2:4])
-            day = int(date_str[4:6])
-            exp_date = date(year, month, day)
-
-            opt_type = "call" if type_char.upper() == "C" else "put"
-
-            strike_price = float(strike_str) / 1000.0
-
-        except (ValueError, IndexError):
-            return None
-
-        latest_quote = getattr(opt, "latest_quote", None)
-        bid = 0.0
-        ask = 0.0
-        if latest_quote:
-            if isinstance(latest_quote, dict):
-                bid = float(latest_quote.get("bid_price", 0) or 0)
-                ask = float(latest_quote.get("ask_price", 0) or 0)
+        # 1. Fast extraction of raw attributes into a DataFrame
+        data = []
+        for opt in raw_chain:
+            if isinstance(opt, dict):
+                data.append(opt)
             else:
-                bid = float(getattr(latest_quote, "bid_price", 0) or 0)
-                ask = float(getattr(latest_quote, "ask_price", 0) or 0)
+                data.append(
+                    {
+                        "symbol": getattr(opt, "symbol", None),
+                        "latest_quote": getattr(opt, "latest_quote", None),
+                        "latest_trade": getattr(opt, "latest_trade", None),
+                        "greeks": getattr(opt, "greeks", None),
+                    }
+                )
 
-        last_trade = getattr(opt, "latest_trade", None)
-        last_price = 0.0
-        trade_date = None
-        if last_trade:
-            if isinstance(last_trade, dict):
-                last_price = float(last_trade.get("price", 0) or 0)
-                t_date = last_trade.get("timestamp")
-                if t_date and hasattr(t_date, "date"):
-                    trade_date = t_date.date()
-            else:
-                last_price = float(getattr(last_trade, "price", 0) or 0)
-                t_date = getattr(last_trade, "timestamp", None)
-                if t_date and hasattr(t_date, "date"):
-                    trade_date = t_date.date()
+        df = pd.DataFrame(data)
 
-        mid = (bid + ask) / 2 if (bid and ask) else last_price
+        # 2. Vectorized Filtering
+        root_len = len(ticker)
+        mask = (df["symbol"].str.startswith(ticker)) & (
+            df["symbol"].str.len() >= 15 + root_len
+        )
+        df = df[mask].copy()
 
-        greeks = getattr(opt, "greeks", None)
-        implied_vol = None
-        delta = None
-        gamma = None
-        vega = None
-        theta = None
-        rho = None
+        if df.empty:
+            return pd.DataFrame()
 
-        if greeks:
-            if isinstance(greeks, dict):
-                implied_vol = greeks.get("implied_volatility")
-                delta = greeks.get("delta")
-                gamma = greeks.get("gamma")
-                vega = greeks.get("vega")
-                theta = greeks.get("theta")
-                rho = greeks.get("rho")
-            else:
-                implied_vol = getattr(greeks, "implied_volatility", None)
-                delta = getattr(greeks, "delta", None)
-                gamma = getattr(greeks, "gamma", None)
-                vega = getattr(greeks, "vega", None)
-                theta = getattr(greeks, "theta", None)
-                rho = getattr(greeks, "rho", None)
+        # 3. Vectorized String Parsing for Expiry, Type, and Strike
+        suffix = df["symbol"].str[-15:]
+        df["expiry"] = pd.to_datetime(
+            "20" + suffix.str[:6], format="%Y%m%d", errors="coerce"
+        ).dt.date
+        df["optionType"] = suffix.str[6].str.upper().map({"C": "call", "P": "put"})
+        df["strike"] = suffix.str[7:].astype(float) / 1000.0
 
-        return {
-            "ticker": ticker,
-            "expiry": exp_date,
-            "optionType": opt_type,
-            "strike": strike_price,
-            "lastPrice": last_price,
-            "bid": bid,
-            "ask": ask,
-            "midPrice": mid,
-            "volume": 0,
-            "openInterest": 0,
-            "lastTradeDate": trade_date,
-            "impliedVol": float(implied_vol) if implied_vol else None,
-            "delta": float(delta) if delta else None,
-            "gamma": float(gamma) if gamma else None,
-            "vega": float(vega) if vega else None,
-            "theta": float(theta) if theta else None,
-            "rho": float(rho) if rho else None,
+        # 4. Vectorized Attribute Extraction (Quotes, Trades, Greeks)
+        def get_val(obj, field, default=0.0):
+            if obj is None:
+                return default
+            if isinstance(obj, dict):
+                return obj.get(field, default)
+            return getattr(obj, field, default)
+
+        df["bid"] = df["latest_quote"].apply(
+            lambda x: float(get_val(x, "bid_price") or 0)
+        )
+        df["ask"] = df["latest_quote"].apply(
+            lambda x: float(get_val(x, "ask_price") or 0)
+        )
+        df["lastPrice"] = df["latest_trade"].apply(
+            lambda x: float(get_val(x, "price") or 0)
+        )
+
+        # Mid Price calculation
+        df["midPrice"] = (df["bid"] + df["ask"]) / 2
+        df.loc[(df["bid"] == 0) | (df["ask"] == 0), "midPrice"] = df["lastPrice"]
+
+        # Greeks extraction
+        greek_fields = {
+            "implied_volatility": "impliedVol",
+            "delta": "delta",
+            "gamma": "gamma",
+            "vega": "vega",
+            "theta": "theta",
+            "rho": "rho",
         }
+        for attr, col in greek_fields.items():
+            df[col] = df["greeks"].apply(lambda x: get_val(x, attr, None))
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        # 5. Metadata and Cleanup
+        df["ticker"] = ticker
+        df["volume"] = 0
+        df["openInterest"] = 0
+
+        def extract_date(x):
+            ts = get_val(x, "timestamp", None)
+            return ts.date() if hasattr(ts, "date") else None
+
+        df["lastTradeDate"] = df["latest_trade"].apply(extract_date)
+
+        return df
 
     def fetch_option_chain(self, req: OptionsRequest) -> pd.DataFrame:
         params = self._build_request_kwargs(req)
@@ -161,15 +154,10 @@ class OptionsAdapter:
         else:
             raw_chain = response.values()
 
-        data_rows = []
-        for opt in raw_chain or []:
-            parsed = self._parse_option_to_dict(req.ticker, opt)
-            if parsed:
-                data_rows.append(parsed)
-            if len(data_rows) >= req.limit:
-                break
+        df = self._parse_chain_to_df(req.ticker, list(raw_chain or []))
 
-        df = pd.DataFrame(data_rows)
+        if req.limit and not df.empty:
+            df = df.head(req.limit)
 
         if not df.empty:
             # Timezone handling for accurate Time to Expiry (TTE)
