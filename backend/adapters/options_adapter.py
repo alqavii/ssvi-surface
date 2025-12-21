@@ -1,13 +1,18 @@
 import os
 import pandas as pd
+import numpy as np
 from typing import Any, Dict
-from datetime import datetime, time
+from datetime import datetime, time, date
 import pytz
 from models.options_data import OptionType, OptionsRequest
 from alpaca.data.historical import OptionHistoricalDataClient
 from alpaca.data.requests import OptionChainRequest
 from alpaca.trading.enums import ContractType
 import yfinance as yf
+
+from adapters.ticker_adapter import TickerAdapter
+from engines.zero_rates import ZeroRatesEngine
+from utils.tte import tte
 
 OptionsClient = OptionHistoricalDataClient(
     api_key=os.getenv("ALPACA_KEY"), secret_key=os.getenv("ALPACA_SECRET_KEY")
@@ -16,11 +21,10 @@ OptionsClient = OptionHistoricalDataClient(
 
 class OptionsAdapter:
     @staticmethod
-    def _build_request_kwargs(req: OptionsRequest) -> Dict[str, Any]:
+    def _build_request_kwargs(
+        req: OptionsRequest, spot_price: float, expiry: date = None
+    ) -> Dict[str, Any]:
         params: Dict[str, Any] = {"underlying_symbol": req.ticker}
-
-        ticker = yf.Ticker(req.ticker)
-        spot_price = ticker.history(period="1d")["Close"].iloc[-1]
 
         if req.optionType:
             params["type"] = (
@@ -29,8 +33,9 @@ class OptionsAdapter:
                 else ContractType.PUT
             )
 
-        if req.expiry:
-            params["expiration_date"] = req.expiry.isoformat()
+        target_expiry = expiry or req.expiry
+        if target_expiry:
+            params["expiration_date"] = target_expiry.isoformat()
         else:
             if req.expiryStart:
                 params["expiration_date_gte"] = req.expiryStart.isoformat()
@@ -141,35 +146,69 @@ class OptionsAdapter:
         return df
 
     def fetch_option_chain(self, req: OptionsRequest) -> pd.DataFrame:
-        params = self._build_request_kwargs(req)
-        response = OptionsClient.get_option_chain(OptionChainRequest(**params))
+        ticker_info = TickerAdapter.fetchBasic(req.ticker)
+        spot = ticker_info.spot
+        div = ticker_info.dividendYield
 
-        if not isinstance(response, dict):
+        stock = yf.Ticker(req.ticker)
+        if not stock.options:
             return pd.DataFrame()
 
-        if req.ticker in response and isinstance(response[req.ticker], (list, dict)):
-            raw_chain = response[req.ticker]
+        all_expiries = [datetime.strptime(e, "%Y-%m-%d").date() for e in stock.options]
+
+        target_expiries = []
+        if req.expiry:
+            if req.expiry in all_expiries:
+                target_expiries = [req.expiry]
+        else:
+            start = req.expiryStart or date.min
+            end = req.expiryEnd or date.max
+            target_expiries = [e for e in all_expiries if start <= e <= end]
+
+        if not target_expiries:
+            return pd.DataFrame()
+
+        now_utc = datetime.now(pytz.utc)
+        all_dfs = []
+
+        for expiry in target_expiries:
+            T = tte([expiry], now_utc=now_utc, market_close_et=time(16, 0, 0))[0]
+            rate = ZeroRatesEngine.interpolate_zero_rate(
+                pd.DataFrame({"T": [T]}), tte_col="T"
+            )[0]
+            forward = spot * np.exp((rate - div / 100) * T)
+
+            params = self._build_request_kwargs(req, spot_price=forward, expiry=expiry)
+            response = OptionsClient.get_option_chain(OptionChainRequest(**params))
+
+            if not isinstance(response, dict) or not response:
+                continue
+
+            # When expiration_date is specified, Alpaca returns a dict of {symbol: contract}
+            # instead of {ticker: [contracts]}.
+            if req.ticker in response:
+                raw_chain = response[req.ticker]
+            else:
+                # If ticker not in keys, it might be the flat dict of contracts
+                raw_chain = list(response.values())
+
             if isinstance(raw_chain, dict):
                 raw_chain = raw_chain.values()
-        else:
-            raw_chain = response.values()
 
-        df = self._parse_chain_to_df(req.ticker, list(raw_chain or []))
+            df_expiry = self._parse_chain_to_df(req.ticker, list(raw_chain or []))
+            if not df_expiry.empty:
+                df_expiry["timeToExpiry"] = T
+                all_dfs.append(df_expiry)
+
+        if not all_dfs:
+            return pd.DataFrame()
+
+        df = pd.concat(all_dfs, ignore_index=True)
 
         if req.limit and not df.empty:
             df = df.head(req.limit)
 
         if not df.empty:
-            # Timezone handling for accurate Time to Expiry (TTE)
-            # US Market Close is generally 16:00 ET.
-            # We assume options expire at 16:00 ET on the expiry date.
-            from utils.tte import tte
-
-            now_utc = datetime.now(pytz.utc)
-            df["timeToExpiry"] = tte(
-                df["expiry"], now_utc=now_utc, market_close_et=time(16, 0, 0)
-            )
-
             # Sort by expiry (ascending) and then by strike (ascending)
             df.sort_values(
                 by=["expiry", "strike"], ascending=[True, True], inplace=True
