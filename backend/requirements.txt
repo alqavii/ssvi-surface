@@ -1,13 +1,14 @@
-alpaca-py>=0.30.0
+alpaca-py==0.43.2
 fastapi==0.127.0
 fredapi==0.5.2
 matplotlib==3.10.8
 numpy==2.4.0
 pandas==2.3.3
-plotly==5.24.1
+plotly==6.5.0
 pydantic==2.12.5
-python-dateutil==2.9.0.post0
+python_dateutil==2.9.0.post0
 pytz==2025.2
+scikit_learn==1.8.0
 scipy==1.16.3
 streamlit==1.47.0
 uvicorn==0.40.0
