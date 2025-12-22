@@ -8,6 +8,8 @@ from dateutil.relativedelta import relativedelta
 from scipy.optimize import minimize, brentq
 from scipy.interpolate import griddata
 from scipy.special import ndtr
+from sklearn.isotonic import IsotonicRegression
+from scipy.interpolate import PchipInterpolator
 import os
 import pandas as pd
 import pytz
@@ -340,10 +342,14 @@ class IVEngine:
             }
         )
         is_call = np.where(df["type"] == OptionType.CALL.value, 1, -1).astype(float)
-        
+
         # Extract the rate values for the filtered indices
-        rate_filtered = rate[df.index.values] if isinstance(rate, np.ndarray) else rate.values[df.index.values]
-        
+        rate_filtered = (
+            rate[df.index.values]
+            if isinstance(rate, np.ndarray)
+            else rate.values[df.index.values]
+        )
+
         df["iv"] = IVEngine._implied_volatility(
             df["Price"].values,
             df["K"].values,
@@ -730,21 +736,18 @@ if run_analysis:
                 surface_data["w"] = surface_data["iv"] ** 2 * surface_data["T"]
 
                 # Calculate theta
-                theta_low = (
-                    surface_data[surface_data["k"] < 0]
-                    .groupby("T")[["expiry", "k", "w", "K", "F", "iv"]]
-                    .max()
-                )
-                theta_high = (
-                    surface_data[surface_data["k"] > 0]
-                    .groupby("T")[["expiry", "k", "w", "K", "F", "iv"]]
-                    .min()
-                )
-                interpolated_values = theta_high["w"] - (
-                    theta_high["w"] - theta_low["w"]
-                ) * (theta_high["k"] / (theta_high["k"] - theta_low["k"]))
-                surface_data["theta"] = surface_data["T"].map(interpolated_values)
 
+                thetas = surface_data.loc[
+                    surface_data["k"].abs().groupby(surface_data["T"]).idxmin()
+                ][["T", "k", "w"]].reset_index(drop=True)
+
+                iso = IsotonicRegression(increasing=True, out_of_bounds="clip")
+                theta_iso = iso.fit_transform(thetas["T"], thetas["w"])
+
+                theta_spline = PchipInterpolator(
+                    thetas["T"], theta_iso, extrapolate=True
+                )
+                surface_data["theta"] = theta_spline(surface_data["T"])
                 # Calculate vega
                 vega = IVEngine._vega(
                     surface_data["iv"],
