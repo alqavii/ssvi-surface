@@ -1,9 +1,12 @@
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 from datetime import date
 from dateutil.relativedelta import relativedelta
 from scipy.optimize import minimize
+from scipy.interpolate import griddata
 
 from adapters.options_adapter import OptionsAdapter
 from adapters.ticker_adapter import TickerAdapter
@@ -25,9 +28,12 @@ st.sidebar.header("Configuration")
 # Ticker input
 ticker = st.sidebar.text_input("Ticker Symbol", value="NVDA")
 
-# Duration selection
-duration_months = st.sidebar.slider(
-    "Duration (months)", min_value=1, max_value=60, value=12
+# Expiry range selection
+expiry_min_weeks = st.sidebar.slider(
+    "Min Expiry (weeks)", min_value=0, max_value=52, value=4
+)
+expiry_max_months = st.sidebar.slider(
+    "Max Expiry (months)", min_value=1, max_value=60, value=12
 )
 
 # Moneyness range
@@ -45,7 +51,7 @@ if run_analysis:
     status_container = st.container()
 
     with status_container:
-        st.info("🔄 Running analysis... This may take a moment.")
+        st.info("Running analysis... This may take a moment.")
 
         try:
             # Update rates
@@ -55,8 +61,8 @@ if run_analysis:
             # Setup adapter and request
             adapter = OptionsAdapter()
             today = date.today()
-            expiry_start = today + relativedelta(weeks=4)
-            expiry_end = today + relativedelta(months=duration_months)
+            expiry_start = today + relativedelta(weeks=expiry_min_weeks)
+            expiry_end = today + relativedelta(months=expiry_max_months)
 
             req = OptionsRequest(
                 ticker=ticker,
@@ -224,23 +230,21 @@ if run_analysis:
 
             with tab1:
                 st.dataframe(
-                    df[
-                        ["optionType", "strike", "timeToExpiry", "midPrice", "expiry"]
-                    ].head(20),
+                    df[["optionType", "strike", "timeToExpiry", "midPrice", "expiry"]],
                     use_container_width=True,
                     height=400,
                 )
 
             with tab2:
                 st.dataframe(
-                    surface_data[["expiry", "K", "k", "w", "theta"]].head(20),
+                    surface_data[["expiry", "K", "k", "w", "theta"]],
                     use_container_width=True,
                     height=400,
                 )
 
             with tab3:
                 st.dataframe(
-                    surface_data[["expiry", "K", "iv", "iv_ssvi", "iv_error"]].head(20),
+                    surface_data[["expiry", "K", "iv", "iv_ssvi", "iv_error"]],
                     use_container_width=True,
                     height=400,
                 )
@@ -251,11 +255,11 @@ if run_analysis:
             col1, col2 = st.columns(2)
 
             with col1:
-                st.subheader("SSVI Relative Residuals")
+                st.subheader("SSVI Residuals")
                 fig, ax = plt.subplots(figsize=(10, 6))
                 scatter = ax.scatter(
                     surface_data["k"],
-                    surface_data["relative_residuals"],
+                    surface_data["residuals"],
                     c=surface_data["T"],
                     cmap="viridis",
                     alpha=0.6,
@@ -263,8 +267,8 @@ if run_analysis:
                 )
                 plt.colorbar(scatter, ax=ax, label="Time to Expiry (T)")
                 ax.set_xlabel("Log-Moneyness (k)")
-                ax.set_ylabel("Relative Residuals (%)")
-                ax.set_title("SSVI Model Relative Residuals vs Log-Moneyness")
+                ax.set_ylabel("Residuals")
+                ax.set_title("SSVI Model Residuals vs Log-Moneyness")
                 ax.axhline(0, color="red", linestyle="--", linewidth=2)
                 ax.grid(True, alpha=0.3)
                 st.pyplot(fig)
@@ -306,12 +310,106 @@ if run_analysis:
 
             st.success("✓ Analysis complete!")
 
+            # 3D Surface Plots - Market vs Model
+            st.header("IV Surface Comparison")
+
+            # Prepare data for 3D surface plots
+            # Create a regular grid for interpolation
+            k_min, k_max = surface_data["k"].min(), surface_data["k"].max()
+            T_min, T_max = surface_data["T"].min(), surface_data["T"].max()
+
+            # Create a grid with 50x50 points
+            grid_k, grid_T = np.mgrid[k_min:k_max:50j, T_min:T_max:50j]
+
+            # Convert log-moneyness to moneyness (K/F) for plotting
+            grid_M = np.exp(grid_k)
+
+            # Interpolate data onto the grid
+            points = surface_data[["k", "T"]].values
+
+            # Market IV interpolation
+            grid_iv_market = griddata(
+                points,
+                surface_data["iv"].values,
+                (grid_k, grid_T),
+                method="linear",
+            )
+
+            # Model IV interpolation
+            grid_iv_model = griddata(
+                points,
+                surface_data["iv_ssvi"].values,
+                (grid_k, grid_T),
+                method="linear",
+            )
+
+            # Create side-by-side 3D surface plots
+            fig = make_subplots(
+                rows=1,
+                cols=2,
+                specs=[[{"type": "surface"}, {"type": "surface"}]],
+                subplot_titles=("Market IV Surface", "Model IV Surface"),
+            )
+
+            # Market IV surface
+            fig.add_trace(
+                go.Surface(
+                    x=grid_M,
+                    y=grid_T,
+                    z=grid_iv_market,
+                    colorscale="Viridis",
+                    name="Market IV",
+                    showscale=True,
+                    colorbar=dict(x=0.45, len=0.8),
+                ),
+                row=1,
+                col=1,
+            )
+
+            # Model IV surface
+            fig.add_trace(
+                go.Surface(
+                    x=grid_M,
+                    y=grid_T,
+                    z=grid_iv_model,
+                    colorscale="Viridis",
+                    name="Model IV",
+                    showscale=True,
+                    colorbar=dict(x=1.02, len=0.8),
+                ),
+                row=1,
+                col=2,
+            )
+
+            # Update layout
+            fig.update_layout(
+                title_text="Implied Volatility Surface: Market vs SSVI Model",
+                height=700,
+                width=1400,
+                showlegend=False,
+                scene=dict(
+                    xaxis_title="Moneyness (K/F)",
+                    yaxis_title="Time to Expiry (Years)",
+                    zaxis_title="Implied Volatility",
+                ),
+                scene2=dict(
+                    xaxis_title="Moneyness (K/F)",
+                    yaxis_title="Time to Expiry (Years)",
+                    zaxis_title="Implied Volatility",
+                ),
+            )
+
+            # Note: update_xaxes/update_yaxes don't work well for 3D subplots in the same way
+            # We set titles in the scene dictionaries above
+
+            st.plotly_chart(fig, use_container_width=True)
+
         except Exception as e:
-            st.error(f"❌ Error during analysis: {str(e)}")
+            st.error(f"Error during analysis: {str(e)}")
             import traceback
 
             st.error(traceback.format_exc())
 else:
     st.info(
-        "👈 Configure the parameters in the sidebar and click 'Run Analysis' to begin."
+        "<-- Configure the parameters in the sidebar and click 'Run Analysis' to begin."
     )
