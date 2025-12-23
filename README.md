@@ -84,7 +84,7 @@ Median Vega Weighted RMSE: 0.0079
 
 This is in line with Academic papers, although the sample set my metrics were tested on consists of very well behaved highly liquid stocks, so the results may not be consistent across less trade equities.
 
-<img width="968" height="700" alt="newplot" src="https://github.com/user-attachments/assets/0ff49916-8c81-4518-99a0-50ce61e395eb" />
+<img width="2073" height="1187" alt="image" src="https://github.com/user-attachments/assets/a4a1c03d-5ba3-43b2-b6f4-5d8007b433ed" />
 
 Visually, the model seems to have generated a very satisfactory surface that represents the market, while being arbitrage free.
 
