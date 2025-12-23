@@ -921,7 +921,7 @@ if run_analysis:
                     plt.close()
 
                 with col2:
-                    st.subheader("IV Error")
+                    st.subheader("IV Error (%)")
                     fig, ax = plt.subplots(figsize=(10, 6))
                     scatter = ax.scatter(
                         surface_data["k"],
@@ -948,11 +948,16 @@ if run_analysis:
                 rmse = np.sqrt(
                     np.mean((surface_data["iv_ssvi"] - surface_data["iv"]) ** 2)
                 )
-                avg_iv = np.mean(surface_data["iv"])
+                vega_weighted_rmse = np.sqrt(
+                    np.sum(
+                        ((surface_data["iv_ssvi"] - surface_data["iv"]) ** 2)
+                        * (surface_data["vega"] / np.sum(surface_data["vega"]))
+                    )
+                )
 
                 col1, col2, col3, col4 = st.columns(4)
-                col1.metric("IV RMSE", f"{rmse:.4f}")
-                col2.metric("RMSE/Avg IV", f"{rmse / avg_iv * 100:.4f}%")
+                col1.metric("IV RMSE", f"{rmse * 100:.4f}%")
+                col2.metric("Vega Weighted RMSE", f"{vega_weighted_rmse * 100:.4f}%")
                 col3.metric("Mean IV Error", f"{mean_iv_error:.4f}%")
                 col4.metric("Max IV Error", f"{max_iv_error:.4f}%")
 
