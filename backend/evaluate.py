@@ -18,7 +18,7 @@ from scipy.optimize import minimize
 
 adapter = OptionsAdapter()
 today = date.today()
-expiry_start = today + relativedelta(weeks=4)
+expiry_start = today + relativedelta(weeks=5)
 expiry_end = today + relativedelta(weeks=56)
 
 
@@ -29,14 +29,14 @@ def ssvi_w(k, theta, phi, rho):
     return w_ssvi
 
 
-def objective(x, theta, k, w_mkt, idx):
+def objective(x, theta, k, w_mkt, idx, weights):
     rho_raw = x[0]
     rho = np.tanh(rho_raw)
     eta = x[1:]
     phi = eta[idx] / np.sqrt(np.maximum(theta, 1e-12))
     w_model = ssvi_w(k, theta, phi, rho)
     error = w_model - w_mkt
-    loss = np.dot(error, error)
+    loss = np.dot(weights * error, error) * 100000
     return loss
 
 
@@ -92,6 +92,7 @@ def one_pass(ticker: str, expiry_start: date, expiry_end: date):
         surface_data["F"],
     )
     surface_data["vega"] = np.clip(vega, 1e-6, None)
+    weights = surface_data.groupby("T")["vega"].transform(lambda x: x / x.sum())
     T_vals = surface_data["T"].values
     T_unique = np.sort(surface_data["T"].unique())
     T_to_index = {t: i for i, t in enumerate(T_unique)}
@@ -104,7 +105,7 @@ def one_pass(ticker: str, expiry_start: date, expiry_end: date):
     res = minimize(
         objective,
         x0=x0,
-        args=(theta, k, w_mkt, idx),
+        args=(theta, k, w_mkt, idx, weights),
         method="SLSQP",
         bounds=bounds,
         constraints=make_constraints(len(T_unique)),
@@ -116,15 +117,17 @@ def one_pass(ticker: str, expiry_start: date, expiry_end: date):
         rho=np.tanh(res.x[0]),
     )
     surface_data["iv_ssvi"] = np.sqrt(surface_data["w_ssvi"] / surface_data["T"])
-    surface_data["square_error"] = (surface_data["iv"] - surface_data["iv_ssvi"]) ** 2
-    surface_data["vega_weighted_square_error"] = surface_data["square_error"] * (
-        surface_data["vega"] / surface_data["vega"].sum()
-    )
-    rmse = np.sqrt(np.mean((surface_data["iv_ssvi"] - surface_data["iv"]) ** 2))
-    surface_data["iv_error"] = (surface_data["iv_ssvi"] / surface_data["iv"] - 1) * 100
-    rmse_avg_iv = rmse / np.mean(surface_data["iv"])
 
-    return [rmse, rmse_avg_iv]
+    rmse = np.sqrt(np.mean((surface_data["iv_ssvi"] - surface_data["iv"]) ** 2))
+
+    vega_weighted_rmse = np.sqrt(
+        np.sum(
+            ((surface_data["iv_ssvi"] - surface_data["iv"]) ** 2)
+            * (surface_data["vega"] / np.sum(surface_data["vega"]))
+        )
+    )
+
+    return [rmse, vega_weighted_rmse]
 
 
 top_100_tickers = [
@@ -230,24 +233,30 @@ top_100_tickers = [
     "CB",
 ]
 
+test = ["AAPL", "MSFT", "TSLA", "NVDA", "AMZN"]
+
 results = {}
 
 for ticker in top_100_tickers:
     try:
-        rmse, rmse_avg_iv = one_pass(ticker, expiry_start, expiry_end)
-        results[ticker] = (rmse, rmse_avg_iv)
-        print(f"{ticker}: RMSE = {rmse:.4f}, RMSE/Avg IV = {rmse_avg_iv * 100:.4f}%")
+        rmse, vega_weighted_rmse = one_pass(ticker, expiry_start, expiry_end)
+        results[ticker] = (rmse, vega_weighted_rmse)
+        print(
+            f"{ticker}: RMSE = {rmse:.4f}, Vega Weighted RMSE = {vega_weighted_rmse:.4f}"
+        )
     except Exception as e:
         print(f"Error processing {ticker}: {e}")
 
 print("\nSummary of Results:")
 
 mean_rmse = np.mean([v[0] for v in results.values()])
-rmse_avg_iv_error_overall = np.mean([v[1] for v in results.values()])
+vega_weighted_rmse_overall = np.mean([v[1] for v in results.values()])
 median_rmse = np.median([v[0] for v in results.values()])
-median_rmse_avg_iv_error = np.median([v[1] for v in results.values()])
+median_vega_weighted_rmse = np.median([v[1] for v in results.values()])
 
 print(f"Average RMSE across all tickers: {mean_rmse:.4f}")
-print(f"Average RMSE/Avg IV across all tickers: {rmse_avg_iv_error_overall * 100:.4f}%")
+print(
+    f"Average Vega Weighted RMSE across all tickers: {vega_weighted_rmse_overall:.4f}"
+)
 print(f"Median RMSE across all tickers: {median_rmse:.4f}")
-print(f"Median RMSE/Avg IV across all tickers: {median_rmse_avg_iv_error * 100:.4f}%")
+print(f"Median Vega Weighted RMSE across all tickers: {median_vega_weighted_rmse:.4f}")
