@@ -70,6 +70,28 @@ The calibrated surface is validated through:
 
 - Visual comparison of calibrated surface against raw market implied volatilities
 
+## Evaluation
+
+For a project of this scale, the results have been fairly successful. 
+Across the MAG7 stocks:
+
+```
+Average RMSE: 0.0114
+Median RMSE: 0.0099
+Average Vega Weighted RMSE: 0.0088
+Median Vega Weighted RMSE: 0.0079
+```
+
+This is in line with Academic papers, although the sample set my metrics were tested on consists of very well behaved highly liquid stocks, so the results may not be consistent across less trade equities.
+
+<img width="2073" height="1187" alt="image" src="https://github.com/user-attachments/assets/a4a1c03d-5ba3-43b2-b6f4-5d8007b433ed" />
+
+Visually, the model seems to have generated a very satisfactory surface that represents the market, while being arbitrage free.
+
+<img width="1460" height="956" alt="image" src="https://github.com/user-attachments/assets/35382c03-0f9a-4444-a746-456b3f9e4ff9" />
+
+The residuals are also all evenly spread on both sides of 0, with no visible bias for moneyness, suggesting there are no/minimal structural problems and that the model has managed to capture the volatility smile effectively.
+
 
 ## Limitations & Future Work
 
@@ -81,14 +103,13 @@ Current limitations:
 
 - Model parametrization does not account for volatility clustering or jump risk
 
-Future extensions:
+Possible Future extensions:
 
 - Implement OIS-based discounting for alignment with modern frameworks
 
 - Joint surface calibration to enforce cross-expiry consistency
 
-- Integration with stochastic volatility models (Heston, rough volatility)
+- Integration with stochastic volatility models (eg. Heston)
 
-- Sensitivity analysis to curve shock scenarios
 
 
