@@ -13,7 +13,6 @@ class IVEngine:
     @staticmethod
     def generateIVSmile(
         options_df: pd.DataFrame,
-        rate: pd.DataFrame,
         dividendYield: float,
         spot: float,
         optionType: OptionType,
@@ -30,7 +29,7 @@ class IVEngine:
         )
         is_call = np.where(df["type"] == OptionType.CALL.value, 1, -1).astype(float)
         df["iv"] = IVEngine._implied_volatility(
-            df["Price"], df["K"], df["T"], rate, dividendYield, spot, is_call
+            df["Price"], df["K"], df["T"], df["rate"], dividendYield, spot, is_call
         )
         df["S"] = spot  # Add spot price for moneyness calculations
 

@@ -134,7 +134,7 @@ def tte(
     if isinstance(expiry, Iterable) and not isinstance(expiry, (str, bytes)):
         return [_one(e) for e in expiry]
 
-    return _one(expiry)
+    return _one(expiry)  # type: ignore
 
 
 def norm_pdf(x):
@@ -149,7 +149,7 @@ def norm_pdf(x):
 
 def calc_zero_rates(yields: pd.Series) -> dict:
     """Calculate discount factors from par yields. Returns dict mapping tenor to discount factor."""
-    ys = pd.Series({float(k): float(v) for k, v in yields.items()}).sort_index()
+    ys = pd.Series({float(k): float(v) for k, v in yields.items()}).sort_index()  # type: ignore
     discountRates = {}
 
     if 0.5 in ys.index and not math.isnan(ys.loc[0.5]):
@@ -196,7 +196,7 @@ def calc_zero_rates(yields: pd.Series) -> dict:
         steps = int((tenor - prev) * 2)
         for k in range(1, steps + 1):
             t = prev + k * 0.5
-            discountRates[t] = discountRates[prev] * math.exp(-forwardRate * (k * 0.5))
+            discountRates[t] = discountRates[prev] * math.exp(-forwardRate * (k * 0.5))  # type: ignore
 
     desired_bond_tenors = sorted(TENOR_TO_ID.keys())
     filtered = {t: discountRates[t] for t in desired_bond_tenors if t in discountRates}
@@ -249,7 +249,9 @@ def fetch_zero_rates_stateless() -> dict:
 
 
 def interpolate_zero_rate_stateless(
-    df, tte_col="T", zero_curve: dict = None
+    df,
+    tte_col="T",
+    zero_curve: dict = None,  # type: ignore
 ) -> np.ndarray:
     """Interpolate zero rates from in-memory zero curve."""
     if zero_curve is None:
@@ -430,7 +432,9 @@ class TickerAdapter:
 class OptionsAdapter:
     @staticmethod
     def _build_request_kwargs(
-        req: OptionsRequest, spot_price: float, expiry: date = None
+        req: OptionsRequest,
+        spot_price: float,
+        expiry: date = None,  # type: ignore
     ) -> Dict[str, Any]:
         params: Dict[str, Any] = {"underlying_symbol": req.ticker}
 
@@ -531,7 +535,7 @@ class OptionsAdapter:
             "rho": "rho",
         }
         for attr, col in greek_fields.items():
-            df[col] = df["greeks"].apply(lambda x: get_val(x, attr, None))
+            df[col] = df["greeks"].apply(lambda x: get_val(x, attr, None))  # type: ignore
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
         df["ticker"] = ticker
@@ -539,8 +543,8 @@ class OptionsAdapter:
         df["openInterest"] = 0
 
         def extract_date(x):
-            ts = get_val(x, "timestamp", None)
-            return ts.date() if hasattr(ts, "date") else None
+            ts = get_val(x, "timestamp", None)  # type: ignore
+            return ts.date() if hasattr(ts, "date") else None  # type: ignore
 
         df["lastTradeDate"] = df["latest_trade"].apply(extract_date)
 
@@ -548,7 +552,8 @@ class OptionsAdapter:
 
     @staticmethod
     def fetch_option_chain(
-        req: OptionsRequest, zero_curve: dict = None
+        req: OptionsRequest,
+        zero_curve: dict = None,  # type: ignore
     ) -> pd.DataFrame:
         client = OptionHistoricalDataClient(
             api_key=os.getenv("ALPACA_KEY"),
@@ -581,7 +586,7 @@ class OptionsAdapter:
         all_dfs = []
 
         for expiry in target_expiries:
-            T = tte([expiry], now_utc=now_utc, market_close_et=time_cls(16, 0, 0))[0]
+            T = tte([expiry], now_utc=now_utc, market_close_et=time_cls(16, 0, 0))[0]  # type: ignore
 
             # Get zero rate using in-memory zero curve
             if zero_curve is None:
@@ -742,7 +747,7 @@ if run_analysis:
                 ][["T", "k", "w"]].reset_index(drop=True)
 
                 iso = IsotonicRegression(increasing=True, out_of_bounds="clip")
-                theta_iso = iso.fit_transform(thetas["T"], thetas["w"])
+                theta_iso = iso.fit_transform(thetas["T"], thetas["w"])  # type: ignore
 
                 theta_spline = PchipInterpolator(
                     thetas["T"], theta_iso, extrapolate=True
@@ -780,6 +785,13 @@ if run_analysis:
                         )
                         return w_ssvi
 
+                    weights = (
+                        surface_data.groupby("T")["vega"].transform(
+                            lambda x: x / x.sum()
+                        )
+                        * 100
+                    )
+
                     def objective(x, theta, k, w_mkt, idx):
                         rho_raw = x[0]
                         rho = np.tanh(rho_raw)
@@ -787,7 +799,7 @@ if run_analysis:
                         phi = eta[idx] / np.sqrt(np.maximum(theta, 1e-12))
                         w_model = ssvi_w(k, theta, phi, rho)
                         error = w_model - w_mkt
-                        loss = np.dot(error, error)
+                        loss = np.dot(weights * error, error)
                         return loss
 
                     def make_constraints(n_expiries):
@@ -823,7 +835,7 @@ if run_analysis:
                     surface_data["w_ssvi"] = ssvi_w(
                         k,
                         theta,
-                        phi=eta_opt[idx] / np.sqrt(np.maximum(theta, 1e-12)),
+                        phi=eta_opt[idx] / np.sqrt(np.maximum(theta, 1e-12)),  # type: ignore
                         rho=rho_opt,
                     )
 
@@ -931,16 +943,16 @@ if run_analysis:
                 # Additional metrics
                 st.header("Performance Metrics")
 
-                mean_relative_error = np.mean(
-                    np.abs(surface_data["relative_residuals"])
-                )
-                max_relative_error = np.max(np.abs(surface_data["relative_residuals"]))
                 mean_iv_error = np.mean(np.abs(surface_data["iv_error"]))
                 max_iv_error = np.max(np.abs(surface_data["iv_error"]))
+                rmse = np.sqrt(
+                    np.mean((surface_data["iv_ssvi"] - surface_data["iv"]) ** 2)
+                )
+                avg_iv = np.mean(surface_data["iv"])
 
                 col1, col2, col3, col4 = st.columns(4)
-                col1.metric("Mean Relative Error", f"{mean_relative_error:.4f}%")
-                col2.metric("Max Relative Error", f"{max_relative_error:.4f}%")
+                col1.metric("IV RMSE", f"{rmse:.4f}")
+                col2.metric("RMSE/Avg IV", f"{rmse / avg_iv * 100:.4f}%")
                 col3.metric("Mean IV Error", f"{mean_iv_error:.4f}%")
                 col4.metric("Max IV Error", f"{max_iv_error:.4f}%")
 
